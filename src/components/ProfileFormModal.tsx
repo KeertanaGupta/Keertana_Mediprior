@@ -5,9 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface ProfileFormModalProps {
@@ -16,7 +14,6 @@ interface ProfileFormModalProps {
 }
 
 export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) => {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -25,35 +22,63 @@ export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) 
     gender: '',
     weight: '',
     height: '',
-    substanceUse: '',
+    substance_use: '',
     history: ''
   });
 
   useEffect(() => {
-    if (user && open) {
+    if (open) {
       loadProfile();
     }
-  }, [user, open]);
+  }, [open]);
 
   const loadProfile = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     
-    const docRef = doc(db, 'profiles', user.uid);
-    const docSnap = await getDoc(docRef);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
     
-    if (docSnap.exists()) {
-      setFormData(docSnap.data() as any);
+    if (data && !error) {
+      setFormData({
+        name: data.name || '',
+        age: data.age?.toString() || '',
+        dob: data.dob || '',
+        gender: data.gender || '',
+        weight: data.weight?.toString() || '',
+        height: data.height?.toString() || '',
+        substance_use: data.substance_use || '',
+        history: data.history || ''
+      });
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     setLoading(true);
     try {
-      await setDoc(doc(db, 'profiles', user.uid), formData);
-      await setDoc(doc(db, 'users', user.uid), { profileComplete: true }, { merge: true });
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          name: formData.name,
+          age: formData.age ? parseInt(formData.age) : null,
+          dob: formData.dob || null,
+          gender: formData.gender || null,
+          weight: formData.weight ? parseFloat(formData.weight) : null,
+          height: formData.height ? parseFloat(formData.height) : null,
+          substance_use: formData.substance_use || null,
+          history: formData.history || null
+        });
+
+      if (error) throw error;
+
       toast.success('Profile saved successfully!');
       onOpenChange(false);
     } catch (error) {
@@ -94,7 +119,6 @@ export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) 
                 type="number"
                 value={formData.age}
                 onChange={(e) => handleChange('age', e.target.value)}
-                required
               />
             </div>
 
@@ -105,7 +129,6 @@ export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) 
                 type="date"
                 value={formData.dob}
                 onChange={(e) => handleChange('dob', e.target.value)}
-                required
               />
             </div>
 
@@ -128,9 +151,9 @@ export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) 
               <Input
                 id="weight"
                 type="number"
+                step="0.1"
                 value={formData.weight}
                 onChange={(e) => handleChange('weight', e.target.value)}
-                required
               />
             </div>
 
@@ -139,20 +162,20 @@ export const ProfileFormModal = ({ open, onOpenChange }: ProfileFormModalProps) 
               <Input
                 id="height"
                 type="number"
+                step="0.1"
                 value={formData.height}
                 onChange={(e) => handleChange('height', e.target.value)}
-                required
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="substanceUse">Substance Use</Label>
+            <Label htmlFor="substance_use">Substance Use</Label>
             <Textarea
-              id="substanceUse"
+              id="substance_use"
               placeholder="Alcohol, tobacco, prescribed medications, etc."
-              value={formData.substanceUse}
-              onChange={(e) => handleChange('substanceUse', e.target.value)}
+              value={formData.substance_use}
+              onChange={(e) => handleChange('substance_use', e.target.value)}
               rows={3}
             />
           </div>

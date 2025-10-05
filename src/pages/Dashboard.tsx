@@ -1,28 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { HealthCard } from '@/components/HealthCard';
 import { ProfileFormModal } from '@/components/ProfileFormModal';
 import { UploadReportModal } from '@/components/UploadReportModal';
 import { ConnectWatchModal } from '@/components/ConnectWatchModal';
 import { Heart, Activity, Footprints, Upload, User, Calendar as CalendarIcon, Watch, FileText, Download } from 'lucide-react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { supabase } from '@/integrations/supabase/client';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 
 interface Report {
   id: string;
-  fileName: string;
-  date: string;
-  notes: string;
-  url: string;
-  createdAt: string;
+  file_name: string;
+  report_date: string;
+  notes: string | null;
+  file_url: string;
+  created_at: string;
 }
 
 const Dashboard = () => {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -30,36 +27,66 @@ const Dashboard = () => {
   const [reports, setReports] = useState<Report[]>([]);
   const [profileComplete, setProfileComplete] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    
     if (!user) {
       navigate('/login');
       return;
     }
-    loadUserData();
-    loadReports();
-  }, [user, navigate]);
 
-  const loadUserData = async () => {
-    if (!user) return;
+    await loadUserData(user.id);
+    await loadReports(user.id);
+    setLoading(false);
+  };
+
+  const loadUserData = async (userId: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
     
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    if (userDoc.exists()) {
-      setProfileComplete(userDoc.data()?.profileComplete || false);
+    if (data) {
+      setProfileComplete(!!data.age && !!data.dob && !!data.gender);
     }
   };
 
-  const loadReports = async () => {
-    if (!user) return;
+  const loadReports = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-    const q = query(collection(db, 'reports'), where('uid', '==', user.uid));
-    const querySnapshot = await getDocs(q);
-    const reportsData: Report[] = [];
-    querySnapshot.forEach((doc) => {
-      reportsData.push({ id: doc.id, ...doc.data() } as Report);
-    });
-    setReports(reportsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+    if (data && !error) {
+      setReports(data);
+    }
   };
+
+  const handleReportsUpdate = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await loadReports(user.id);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen pb-12">
@@ -125,13 +152,13 @@ const Dashboard = () => {
                   reports.map((report) => (
                     <div key={report.id} className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted/30 transition-colors">
                       <div className="flex-1">
-                        <h3 className="font-medium">{report.fileName}</h3>
+                        <h3 className="font-medium">{report.file_name}</h3>
                         <p className="text-sm text-muted-foreground mt-1">{report.notes || 'No notes'}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Date: {new Date(report.date).toLocaleDateString()}
+                          Date: {new Date(report.report_date).toLocaleDateString()}
                         </p>
                       </div>
-                      <a href={report.url} target="_blank" rel="noopener noreferrer">
+                      <a href={report.file_url} target="_blank" rel="noopener noreferrer">
                         <Button variant="ghost" size="sm">
                           <Download className="w-4 h-4" />
                         </Button>
@@ -210,7 +237,7 @@ const Dashboard = () => {
       <UploadReportModal 
         open={uploadModalOpen} 
         onOpenChange={setUploadModalOpen} 
-        onUploadSuccess={loadReports}
+        onUploadSuccess={handleReportsUpdate}
       />
       <ConnectWatchModal open={watchModalOpen} onOpenChange={setWatchModalOpen} />
     </div>

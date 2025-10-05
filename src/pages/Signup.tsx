@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Heart } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 const Signup = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signUp } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,15 +29,37 @@ const Signup = () => {
 
     setLoading(true);
     try {
-      await signUp(email, password, name);
+      // Sign up the user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name
+          }
+        }
+      });
+
+      if (authError) throw authError;
+
+      // Create profile
+      if (authData.user) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: authData.user.id,
+            name: name
+          });
+
+        if (profileError) throw profileError;
+      }
+
       toast.success('Account created successfully!');
       navigate('/dashboard');
     } catch (error: any) {
       console.error(error);
-      if (error.code === 'auth/email-already-in-use') {
+      if (error.message?.includes('already registered')) {
         toast.error('Email already in use. Please login or use a different email.');
-      } else if (error.code === 'auth/invalid-email') {
-        toast.error('Please enter a valid email address');
       } else {
         toast.error('Please enter valid email and strong password');
       }

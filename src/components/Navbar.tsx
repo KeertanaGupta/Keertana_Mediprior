@@ -1,14 +1,30 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Heart, LogOut } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useEffect, useState } from 'react';
+import { User } from '@supabase/supabase-js';
 
 export const Navbar = () => {
-  const { user, signOut } = useAuth();
+  const [user, setUser] = useState<User | null>(null);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   const handleSignOut = async () => {
-    await signOut();
+    await supabase.auth.signOut();
     navigate('/');
   };
 

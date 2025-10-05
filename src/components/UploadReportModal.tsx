@@ -4,10 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc } from 'firebase/firestore';
-import { storage, db } from '@/lib/firebase';
-import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Upload } from 'lucide-react';
 
@@ -18,7 +15,6 @@ interface UploadReportModalProps {
 }
 
 export const UploadReportModal = ({ open, onOpenChange, onUploadSuccess }: UploadReportModalProps) => {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [date, setDate] = useState('');
@@ -26,25 +22,41 @@ export const UploadReportModal = ({ open, onOpenChange, onUploadSuccess }: Uploa
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !file) return;
+    if (!file) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
     setLoading(true);
     try {
-      // Upload file to Firebase Storage
-      const timestamp = Date.now();
-      const storageRef = ref(storage, `reports/${user.uid}/${timestamp}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      // Upload file to storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
 
-      // Save metadata to Firestore
-      await addDoc(collection(db, 'reports'), {
-        uid: user.uid,
-        fileName: file.name,
-        date,
-        notes,
-        url,
-        createdAt: new Date().toISOString()
-      });
+      const { error: uploadError } = await supabase.storage
+        .from('medical-reports')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('medical-reports')
+        .getPublicUrl(filePath);
+
+      // Save metadata to database
+      const { error: dbError } = await supabase
+        .from('reports')
+        .insert({
+          user_id: user.id,
+          file_name: file.name,
+          file_url: publicUrl,
+          report_date: date,
+          notes: notes || null
+        });
+
+      if (dbError) throw dbError;
 
       toast.success('Report uploaded successfully!');
       onUploadSuccess();
@@ -54,7 +66,7 @@ export const UploadReportModal = ({ open, onOpenChange, onUploadSuccess }: Uploa
       setFile(null);
       setDate('');
       setNotes('');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       toast.error('Failed to upload report');
     } finally {
